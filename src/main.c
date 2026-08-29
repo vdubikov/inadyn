@@ -192,7 +192,7 @@ static void parse_privs(char *user)
 	}
 }
 
-static int compose_paths(void)
+static int compose_paths(int dryrun)
 {
 	/* Default .conf file path: "/etc" + '/' + "inadyn" + ".conf" */
 	if (!config) {
@@ -227,8 +227,14 @@ static int compose_paths(void)
 
 			home = getenv("HOME");
 			if (!home) {
-				logit(LOG_ERR, "Cannot create fallback cache dir: %s", strerror(errno));
-				return 0;
+				/* ignore this for --check-config: the service won't start if the
+				 * main process is not given the option */
+				if (dryrun)
+					return 0;
+				logit(LOG_ERR, "%s: not writable, $HOME missing, please use --cache-dir=PATH",
+				      cache_dir);
+				free(cache_dir);
+				return 1;
 			}
 
 			/* Fallback cache dir: $HOME + "/.cache/" + "inadyn" */
@@ -242,7 +248,7 @@ static int compose_paths(void)
 			}
 
 			snprintf(cache_dir, len, "%s/.cache/%s", home, ident);
-			if (mkdir(cache_dir, 0755) && EEXIST != errno) {
+			if (!dryrun && mkdir(cache_dir, 0755) && EEXIST != errno) {
 				snprintf(cache_dir, len, "%s/.%s", home, ident);
 				mkdir(cache_dir, 0755);
 			}
@@ -256,7 +262,7 @@ static int usage(int code)
 {
         char pidfn[80];
 
-	DO(compose_paths());
+	DO(compose_paths(1));
 	if (pidfile_name[0] != '/')
 		snprintf(pidfn, sizeof(pidfn), "%s/%s.pid", RUNSTATEDIR, pidfile_name);
 	else
@@ -333,9 +339,7 @@ int main(int argc, char *argv[])
 {
 	int c, restart, rc = 0;
 	int use_syslog = 1;
-#ifndef DROP_CHECK_CONFIG
 	int check_config = 0;
-#endif
 	int list = 0, json = 0;
 	int background = 1;
 	static const struct option opt[] = {
@@ -484,7 +488,7 @@ int main(int argc, char *argv[])
 		return plugin_list(json);
 
 	/* Figure out .conf file, cache directory, and PID file name */
-	DO(compose_paths());
+	DO(compose_paths(check_config));
 
 #ifndef DROP_CHECK_CONFIG
 	if (check_config) {
